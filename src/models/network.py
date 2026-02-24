@@ -12,21 +12,22 @@ class ActionValueNetwork:
     
     def __init__(self, network_config):
         self.state_dim = network_config["state_dim"]
-        self.num_hidden_units = network_config["num_hidden_units"]
+        self.num_hidden_units_1 = network_config.get("num_hidden_units", 256)
+        self.num_hidden_units_2 = network_config.get("num_hidden_units_2", 128)
         self.num_actions = network_config["num_actions"]
         
         self.rand_generator = np.random.RandomState(network_config["seed"])
         
-        # Specify self.layer_sizes which shows the number of nodes in each layer
-        self.layer_sizes = [self.state_dim, self.num_hidden_units, self.num_actions]
+        # Specify self.layer_sizes: [input, hidden1, hidden2, output]
+        self.layer_sizes = [self.state_dim, self.num_hidden_units_1, self.num_hidden_units_2, self.num_actions]
         
         
         # Initialize the weights of the neural network
         # self.weights is an array of dictionaries with each dictionary corresponding to 
-        # the weights from one layer to the next. Each dictionary includes W and b
-        self.weights = [dict() for i in range(0, len(self.layer_sizes) - 1)]  # N-1 sets of connections between layers, 3 layer -> 2 connection sets (sets of lines between layers)
+        # the weights from one layer to the next.
+        self.weights = [dict() for i in range(0, len(self.layer_sizes) - 1)]
         for i in range(0, len(self.layer_sizes) - 1):
-            self.weights[i]['W'] = self.init_saxe(self.layer_sizes[i], self.layer_sizes[i + 1]) # Saxe init method is good for deep networks and networks using ReLu
+            self.weights[i]['W'] = self.init_saxe(self.layer_sizes[i], self.layer_sizes[i + 1])
             self.weights[i]['b'] = np.zeros((1, self.layer_sizes[i + 1]))
     
     def get_action_values(self, s):
@@ -36,12 +37,19 @@ class ActionValueNetwork:
         Returns:
             The action-values (Numpy array) calculated using the network's weights.
         """
+        # Layer 1
         W0, b0 = self.weights[0]['W'], self.weights[0]['b']
-        psi = np.dot(s, W0) + b0
-        x = np.maximum(psi, 0)
+        psi0 = np.dot(s, W0) + b0
+        x0 = np.maximum(psi0, 0)
         
+        # Layer 2
         W1, b1 = self.weights[1]['W'], self.weights[1]['b']
-        q_vals = np.dot(x, W1) + b1
+        psi1 = np.dot(x0, W1) + b1
+        x1 = np.maximum(psi1, 0)
+
+        # Output Layer
+        W2, b2 = self.weights[2]['W'], self.weights[2]['b']
+        q_vals = np.dot(x1, W2) + b2
 
         return q_vals
     
@@ -49,30 +57,38 @@ class ActionValueNetwork:
         """
         Args:
             s (Numpy array): The state.
-            delta_mat (Numpy array): A 2D array of shape (batch_size, num_actions). Each row of delta_mat  
-            correspond to one state in the batch. Each row has only one non-zero element 
-            which is the TD-error corresponding to the action taken.
+            delta_mat (Numpy array): A 2D array of shape (batch_size, num_actions).
         Returns:
-            The TD update (Array of dictionaries with gradient times TD errors) for the network's weights
+            The TD update (Array of dictionaries)
         """
 
         W0, b0 = self.weights[0]['W'], self.weights[0]['b']
         W1, b1 = self.weights[1]['W'], self.weights[1]['b']
+        W2, b2 = self.weights[2]['W'], self.weights[2]['b']
         
-        psi = np.dot(s, W0) + b0
-        x = np.maximum(psi, 0)
-        dx = (psi > 0).astype(float)
+        # Forward pass for gradients
+        psi0 = np.dot(s, W0) + b0
+        x0 = np.maximum(psi0, 0)
+        dx0 = (psi0 > 0).astype(float)
 
-        # td_update has the same structure as self.weights, that is an array of dictionaries.
-        # td_update[0]["W"], td_update[0]["b"], td_update[1]["W"], and td_update[1]["b"] have the same shape as 
-        # self.weights[0]["W"], self.weights[0]["b"], self.weights[1]["W"], and self.weights[1]["b"] respectively
+        psi1 = np.dot(x0, W1) + b1
+        x1 = np.maximum(psi1, 0)
+        dx1 = (psi1 > 0).astype(float)
+
         td_update = [dict() for i in range(len(self.weights))]
          
+        # Output layer gradients (Layer 2 -> Output)
         v = delta_mat
-        td_update[1]['W'] = np.dot(x.T, v) * 1. / s.shape[0]
-        td_update[1]['b'] = np.sum(v, axis=0, keepdims=True) * 1. / s.shape[0]
+        td_update[2]['W'] = np.dot(x1.T, v) * 1. / s.shape[0]
+        td_update[2]['b'] = np.sum(v, axis=0, keepdims=True) * 1. / s.shape[0]
         
-        v = np.dot(v, W1.T) * dx
+        # Hidden layer 2 gradients (Layer 1 -> Layer 2)
+        v = np.dot(v, W2.T) * dx1
+        td_update[1]['W'] = np.dot(x0.T, v) * 1. / s.shape[0]
+        td_update[1]['b'] = np.sum(v, axis=0, keepdims=True) * 1. / s.shape[0]
+
+        # Hidden layer 1 gradients (Input -> Layer 1)
+        v = np.dot(v, W1.T) * dx0
         td_update[0]['W'] = np.dot(s.T, v) * 1. / s.shape[0]
         td_update[0]['b'] = np.sum(v, axis=0, keepdims=True) * 1. / s.shape[0]
                 
