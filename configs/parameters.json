@@ -7,7 +7,7 @@
     },
 
     "optimizer_config": {
-        "step_size": 1e-3,
+        "step_size": 1e-4,
         "beta_m": 0.9,
         "beta_v": 0.999,
         "epsilon": 1e-8
@@ -17,11 +17,12 @@
     "minibatch_sz": 64,
     "num_replay_updates_per_step": 4,
     "gamma": 0.99,
-    "tau": 0.001,
+    "tau": 1.0,
+    "tau_soft": 0.005,
 
     "experiment_parameters": {
         "num_runs" : 1,
-        "num_episodes" : 2000,
+        "num_episodes" : 1000,
         "timeout" : 500
     }
 }
